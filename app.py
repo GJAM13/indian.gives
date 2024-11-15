@@ -1,170 +1,209 @@
-# Page configuration must be the first Streamlit command
+import os
+import openai
 import streamlit as st
+import pandas as pd
+
+# Streamlit page configuration
 st.set_page_config(
-    page_title="Bhagavad Gita GPT",
-    page_icon="🕉️",
-    layout="wide"
+    page_title="Bhagavad Gita GPT | Divine Wisdom Through AI | Gjam Technologies",
+    page_icon="😍",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-import time
-import pickle
-import os
-from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
-from openai import OpenAI
+# Load verses function
+@st.cache_data
+def load_verses():
+    try:
+        df = pd.read_csv("only_verses.csv", index_col=0)
+        verses_dict = {}
+        for idx, row in df.iterrows():
+            chapter = str(idx // 1000)  # Assuming 1000 verses per chapter
+            verse = str(idx % 1000)
+            if chapter not in verses_dict:
+                verses_dict[chapter] = {}
+            verses_dict[chapter][verse] = row['index']
+        return df, verses_dict
+    except Exception as e:
+        st.error(f"Error loading verses: {str(e)}")
+        return None, None
 
-# Initialize OpenAI client
-client = OpenAI(api_key=st.secrets['openai_api_key'])
+# Load verses data
+verses_df, verses_dict = load_verses()
 
-# Initialize Hugging Face model and tokenizer
-@st.cache_resource
-def load_model():
-    tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
-    model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
-    return tokenizer, model
+# Function to find matching verses
+def find_matching_verses(question: str, top_k: int = 3) -> list:
+    try:
+        question_words = set(question.lower().split())
+        matches = []
+        for idx, row in verses_df.iterrows():
+            verse_text = row['index'].lower()
+            score = sum(1 for word in question_words if word in verse_text)
+            if score > 0:
+                matches.append({
+                    'reference': idx,
+                    'text': row['index'],
+                    'score': score,
+                    'chapter': str(idx // 1000),
+                    'verse': str(idx % 1000)
+                })
+        matches.sort(key=lambda x: x['score'], reverse=True)
+        return matches[:top_k]
+    except Exception as e:
+        st.error(f"Error finding verses: {str(e)}")
+        return []
 
-tokenizer, model = load_model()
+# Function to generate response using OpenAI API
+def generate_response(question: str, verses: list) -> str:
+    try:
+        openai.api_key = os.getenv("OPENAI_API_KEY")
+        verses_context = "\n\n".join([
+            f"Chapter {v['chapter']}, Verse {v['verse']}:\n{v['text']}"
+            for v in verses
+        ])
+        prompt = f"""You are Krishna providing divine guidance based on the Bhagavad Gita.
 
-# Custom CSS for styling
+Question: {question}
+
+Relevant verses from the Gita:
+{verses_context}
+
+Please provide a response structured as follows:
+
+1. Divine Answer: {question}
+[Provide a direct, compassionate answer from Krishna's perspective]
+
+2. Wisdom from Verses:
+[Explain how the relevant verses apply to the question]
+
+3. Practical Guidance:
+[Provide specific steps or practices to implement the wisdom]
+
+4. Sanskrit Wisdom:
+[Include a relevant Sanskrit shloka with its meaning]
+
+5. Blessing:
+[Conclude with words of encouragement and blessing]
+
+Make the response personal, inspiring, and filled with divine wisdom."""
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            n=1,
+            temperature=0.7,
+        )
+
+        return response.choices[0].message['content'].strip()
+
+    except Exception as e:
+        st.error(f"Error generating response: {str(e)}")
+        return "I apologize, but I am unable to provide guidance at this moment. Please try again."
+
+# CSS styles for the page
 st.markdown("""
 <style>
-    /* Main container */
-    .main {
-        background-color: #0B0B45;
-        padding: 2rem;
+    body {
+        background-color: #f0f2f6;
+        font-family: 'Arial', sans-serif;
     }
-    
-    /* Header styles */
     .header-container {
+        background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
+        padding: 3rem;
+        border-radius: 12px;
         text-align: center;
-        margin-bottom: 2rem;
-        background: linear-gradient(45deg, #1E1E66, #0B0B45);
-        padding: 2rem;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 2.5rem;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
-    
-    .title {
-        color: #A8FF00;
-        font-size: 3rem;
+    .header-container h1 {
+        color: #fff;
+        font-size: 3.5rem;
         font-weight: bold;
-        margin-bottom: 0.5rem;
-        font-family: 'Devanagari MT', serif;
     }
-    
-    .subtitle {
-        color: #FFFFFF;
-        font-size: 1.5rem;
-        margin-bottom: 1rem;
+    .header-container p {
+        color: #f0f2f6;
+        font-size: 1.6rem;
     }
-    
-    .sanskrit-quote {
-        color: #A8FF00;
-        font-size: 1.2rem;
-        font-style: italic;
-        margin: 1rem 0;
-    }
-    
-    /* Input container */
-    .input-container {
-        background: rgba(30, 30, 102, 0.7);
-        padding: 2rem;
+    .search-container {
+        background: #ffffff;
+        padding: 2.5rem;
         border-radius: 15px;
-        margin-bottom: 2rem;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     }
-    
-    /* Suggestion buttons */
-    .suggestion-container {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        justify-content: center;
-        margin: 1rem 0;
-    }
-    
-    .stButton button {
-        background-color: #A8FF00 !important;
-        color: #0B0B45 !important;
-        border: none !important;
-        border-radius: 20px !important;
-        padding: 0.5rem 1rem !important;
-        cursor: pointer !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stButton button:hover {
-        background-color: #C0FF00 !important;
-        transform: scale(1.05) !important;
-    }
-    
-    /* Response container */
     .response-container {
-        background: rgba(30, 30, 102, 0.7);
-        padding: 2rem;
+        background: #ffffff;
+        padding: 2.5rem;
         border-radius: 15px;
-        margin-top: 2rem;
-        color: #FFFFFF;
+        margin-top: 2.5rem;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
     }
-    
-    /* Text input styling */
-    .stTextInput > div > div > input {
-        background-color: rgba(255, 255, 255, 0.1) !important;
-        color: #FFFFFF !important;
-        border: 2px solid #A8FF00 !important;
-        border-radius: 10px !important;
-        padding: 1rem !important;
-        font-size: 1.1rem !important;
+    .verse-container {
+        padding: 1.5rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border-left: 5px solid #6a11cb;
     }
-    
-    .stTextInput > div > div > input::placeholder {
-        color: rgba(255, 255, 255, 0.5) !important;
-    }
-    
-    /* Footer */
-    .footer {
+    .footer-container {
+        margin-top: 3rem;
         text-align: center;
-        padding: 2rem;
-        margin-top: 2rem;
-        color: #FFFFFF;
+        padding-bottom: 2rem;
     }
-    
-    /* Loading animation */
-    .loading {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: #A8FF00;
-        animation: spin 1s ease-in-out infinite;
+    .footer-container p {
+        font-size: 1.4rem;
+        color: #666;
     }
-    
-    @keyframes spin {
-        to { transform: rotate(360deg); }
+    .social-links a {
+        margin: 0 1.2rem;
+        color: #6a11cb;
+        font-size: 1.8rem;
+        text-decoration: none;
+        transition: color 0.3s ease;
     }
-
-    /* Override default Streamlit theme */
-    .stApp {
-        background-color: #0B0B45 !important;
+    .social-links a:hover {
+        color: #2575fc;
+    }
+    .button-style {
+        background-color: #6a11cb;
+        color: #ffffff;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+    }
+    .button-style:hover {
+        background-color: #2575fc;
+    }
+    .text-input-style {
+        width: 100%;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #d1d5db;
+        font-size: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Header
+# Header section
 st.markdown("""
 <div class="header-container">
-    <h1 class="title">🕉️ BHAGAVAD GITA GPT</h1>
-    <p class="subtitle">Seek Divine Wisdom Through AI</p>
-    <p class="sanskrit-quote">"कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।"</p>
+    <h1>🙏 Bhagavad Gita GPT</h1>
+    <p>Gjam Technologies | Seek Divine Wisdom Through AI</p>
 </div>
 """, unsafe_allow_html=True)
 
-# Create columns for better layout
+# Main interface for user input
 col1, col2, col3 = st.columns([1, 2, 1])
 
 with col2:
-    # Suggested questions
+    st.markdown('<div class="search-container">', unsafe_allow_html=True)
+
+    # Suggestions for users
     suggestions = [
         "How can I find inner peace in difficult times?",
         "What does the Gita say about duty and dharma?",
@@ -173,72 +212,73 @@ with col2:
         "How to maintain balance in life?"
     ]
 
-    # Display suggestions in a scrollable container
-    st.markdown('<div class="suggestion-container">', unsafe_allow_html=True)
     for suggestion in suggestions:
-        if st.button(suggestion, key=f"suggestion-{suggestion}"):
+        if st.button(suggestion, key=f"suggestion-{suggestion}", help="Click to use this question"):
             st.session_state.question = suggestion
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Input field
+    # Input for user's question
     question = st.text_input(
-        "Ask your question",
+        "",
+        placeholder="🔍 Ask your question here...",
         key="question",
-        placeholder="Type your question here...",
-        value=st.session_state.get('question', '')
+        value=st.session_state.get('question', ''),
+        help="Type your question to seek divine guidance"
     )
 
-def generate_response(question):
-    # First, try with OpenAI
-    try:
-        prompt = f"""You are Krishna from the Mahabharata, answering questions based on the Bhagavad Gita's teachings.
-        Question: {question}
-        Please provide guidance with wisdom, compassion, and references to specific verses when applicable."""
-        
-        response = client.chat.completions.create(
-            model="gpt-4-turbo-preview",
-            messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": question}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-        return response.choices[0].message.content
-    
-    except Exception as e:
-        # Fallback to local model
-        try:
-            inputs = tokenizer(f"Question about Bhagavad Gita: {question}\nAnswer:", return_tensors="pt", max_length=512, truncation=True)
-            with torch.no_grad():
-                output_sequences = model.generate(
-                    input_ids=inputs["input_ids"],
-                    max_length=200,
-                    temperature=0.7,
-                    top_p=0.9,
-                    num_return_sequences=1
-                )
-            response = tokenizer.decode(output_sequences[0], skip_special_tokens=True)
-            return response
-        except Exception as local_e:
-            return "I apologize, but I am unable to process your question at the moment. Please try again later."
+    # Button to get guidance
+    if st.button("🙏 Seek Divine Guidance", key="search", help="Click to receive divine wisdom"):
+        if question:
+            with st.spinner("Seeking divine wisdom... 🙏"):
+                # Find relevant verses and generate response
+                matching_verses = find_matching_verses(question)
+                response = generate_response(question, matching_verses)
+                
+                # Display generated response
+                st.markdown(f"""
+                <div class="response-container">
+                    <div style="line-height: 1.8;">
+                        {response}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Display matching verses
+                if matching_verses:
+                    st.markdown("""
+                    <h4 style="margin-top: 2rem;">Referenced Verses</h4>
+                    """, unsafe_allow_html=True)
+                    for verse in matching_verses:
+                        st.markdown(f"""
+                        <div class="verse-container">
+                            <div style="font-weight: bold; margin-bottom: 0.5rem;">
+                                Chapter {verse['chapter']}, Verse {verse['verse']}
+                            </div>
+                            <div>
+                                {verse['text']}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
-# Process question when submitted
-if question:
-    with st.spinner('Seeking divine wisdom...'):
-        response = generate_response(question)
-        
-        st.markdown("""
-        <div class="response-container">
-            <h3>Divine Guidance:</h3>
-            <p>{}</p>
-        </div>
-        """.format(response), unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# Footer
+# Footer section
 st.markdown("""
-<div class="footer">
-    <p>🕉️ Created with devotion by GJAM Technologies</p>
-    <p>Part of the Tumhari Universe</p>
+<div class="footer-container">
+    <p>Connect with us on social media:</p>
+    <div class="social-links">
+        <a href="https://www.facebook.com/gjamtechnologies" target="_blank">
+            <i class="fab fa-facebook"></i>
+        </a>
+        <a href="https://twitter.com/gjamtech" target="_blank">
+            <i class="fab fa-twitter"></i>
+        </a>
+        <a href="https://www.linkedin.com/company/gjam-technologies" target="_blank">
+            <i class="fab fa-linkedin"></i>
+        </a>
+        <a href="https://www.instagram.com/gjamtechnologies" target="_blank">
+            <i class="fab fa-instagram"></i>
+        </a>
+    </div>
+    <p>© 2024 Gjam Technologies. All rights reserved.</p>
 </div>
 """, unsafe_allow_html=True)
