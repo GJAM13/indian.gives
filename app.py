@@ -1,203 +1,221 @@
-import pandas as pd
-import numpy as np
 import streamlit as st
 import time
-import faiss
 import pickle
 import os
 from pathlib import Path
-import openai
-import streamlit as st
-import openai
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
+from openai import OpenAI
 
-# Initialize OpenAI API key
-openai.api_key = st.secrets.get('openai_api_key')
+# Initialize OpenAI client
+client = OpenAI(api_key=st.secrets['openai_api_key'])
 
-# Custom CSS for styling and responsiveness
+# Initialize Hugging Face model and tokenizer
+@st.cache_resource
+def load_model():
+    tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+    model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
+    return tokenizer, model
+
+tokenizer, model = load_model()
+
+# Page configuration
+st.set_page_config(
+    page_title="Bhagavad Gita GPT",
+    page_icon="🕉️",
+    layout="wide"
+)
+
+# Custom CSS for styling
 st.markdown("""
-    <style>
-        body {
-            background-color: #0B0B45;  /* Dark navy background */
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-        }
-        .header {
-            font-size: 40px;
-            color: #A8FF00;  /* Neon green */
-            text-align: center;
-            font-weight: bold;
-            margin-top: 20px;
-            animation: fadeIn 2s ease-in-out;
-        }
-        .subheader {
-            font-size: 22px;
-            color: #FFFFFF;
-            text-align: center;
-            margin-top: -20px;
-            margin-bottom: 20px;
-            animation: fadeIn 2s ease-in-out;
-        }
-        .quote {
-            text-align: center;
-            font-size: 20px;
-            color: #A8FF00;
-            font-style: italic;
-            margin-top: 10px;
-            margin-bottom: 30px;
-            animation: fadeIn 2s ease-in-out;
-        }
-        .input-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 20px 0;
-        }
-        .stTextInput>div>div>input {
-            width: 100%;
-            max-width: 600px;
-            padding: 15px;
-            font-size: 18px;
-            border: 2px solid #A8FF00;
-            border-radius: 8px;
-        }
-        .stButton>button {
-            background-color: #A8FF00;
-            color: #000000;
-            padding: 10px 20px;
-            font-size: 16px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.2s ease;
-        }
-        .stButton>button:hover {
-            background-color: #C0FF00;
-            transform: scale(1.05);
-        }
-        .suggestion-box {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-            margin-top: 20px;
-            margin-bottom: 20px;
-        }
-        .suggestion-button {
-            background-color: #A8FF00;
-            color: #000000;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 20px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.1s ease, background-color 0.3s ease;
-        }
-        .suggestion-button:hover {
-            transform: scale(1.05);
-            background-color: #C0FF00;
-        }
-        .answer-section {
-            background-color: #1E1E66;
-            padding: 20px;
-            border-radius: 8px;
-            font-size: 18px;
-            color: #A8FF00;
-            line-height: 1.6;
-            animation: fadeIn 2s ease-in-out;
-            margin-top: 20px;
-        }
-        .footer {
-            font-size: 16px;
-            color: #FFFFFF;
-            text-align: center;
-            margin-top: 50px;
-            font-weight: bold;
-        }
-        .social-icons {
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 10px;
-        }
-        .social-icons img {
-            width: 30px;
-            height: 30px;
-            transition: transform 0.2s;
-        }
-        .social-icons img:hover {
-            transform: scale(1.2);
-        }
-
-        /* Keyframes for animations */
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-    </style>
+<style>
+    /* Main container */
+    .main {
+        background-color: #0B0B45;
+        padding: 2rem;
+    }
+    
+    /* Header styles */
+    .header-container {
+        text-align: center;
+        margin-bottom: 2rem;
+        background: linear-gradient(45deg, #1E1E66, #0B0B45);
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .title {
+        color: #A8FF00;
+        font-size: 3rem;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+        font-family: 'Devanagari MT', serif;
+    }
+    
+    .subtitle {
+        color: #FFFFFF;
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .sanskrit-quote {
+        color: #A8FF00;
+        font-size: 1.2rem;
+        font-style: italic;
+        margin: 1rem 0;
+    }
+    
+    /* Input container */
+    .input-container {
+        background: rgba(30, 30, 102, 0.7);
+        padding: 2rem;
+        border-radius: 15px;
+        margin-bottom: 2rem;
+    }
+    
+    /* Suggestion buttons */
+    .suggestion-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        justify-content: center;
+        margin: 1rem 0;
+    }
+    
+    .suggestion-button {
+        background-color: #A8FF00;
+        color: #0B0B45;
+        border: none;
+        border-radius: 20px;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .suggestion-button:hover {
+        background-color: #C0FF00;
+        transform: scale(1.05);
+    }
+    
+    /* Response container */
+    .response-container {
+        background: rgba(30, 30, 102, 0.7);
+        padding: 2rem;
+        border-radius: 15px;
+        margin-top: 2rem;
+        color: #FFFFFF;
+    }
+    
+    /* Footer */
+    .footer {
+        text-align: center;
+        padding: 2rem;
+        margin-top: 2rem;
+        color: #FFFFFF;
+    }
+    
+    /* Loading animation */
+    .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255,255,255,.3);
+        border-radius: 50%;
+        border-top-color: #A8FF00;
+        animation: spin 1s ease-in-out infinite;
+    }
+    
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+</style>
 """, unsafe_allow_html=True)
 
-# Display logo
-st.image("Search.png", width=150)
-
-# Header and Subheader
-st.markdown("<div class='header'>INDIAN.GIVES</div>", unsafe_allow_html=True)
-st.markdown("<div class='subheader'>Ask Bhagavad Gita Your Questions</div>", unsafe_allow_html=True)
-
-# Display an inspirational Hindi quote
+# Header
 st.markdown("""
-    <div class='quote'>
-        "कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।"
-    </div>
+<div class="header-container">
+    <h1 class="title">🕉️ BHAGAVAD GITA GPT</h1>
+    <p class="subtitle">Seek Divine Wisdom Through AI</p>
+    <p class="sanskrit-quote">"कर्मण्येवाधिकारस्ते मा फलेषु कदाचन।"</p>
+</div>
 """, unsafe_allow_html=True)
-
-# Input field and search button
-with st.form(key='question-form'):
-    st.markdown("<div class='input-container'>", unsafe_allow_html=True)
-    question = st.text_input(
-        "What wisdom are you seeking today?",
-        placeholder="Type your question here...",
-        key="user-input"
-    )
-    submit_button = st.form_submit_button("Ask")
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # Suggested questions
 suggestions = [
-    "How can I find true happiness?",
-    "What should I do if I'm feeling anxious?",
-    "How do I overcome fear?",
-    "What is my purpose in life?",
-    "How can I find peace of mind?"
+    "How can I find inner peace in difficult times?",
+    "What does the Gita say about duty and dharma?",
+    "How to overcome fear and anxiety?",
+    "What is the path to true happiness?",
+    "How to maintain balance in life?"
 ]
 
-st.markdown("<div class='suggestion-box'>", unsafe_allow_html=True)
+# Display suggestions
+st.markdown('<div class="suggestion-container">', unsafe_allow_html=True)
 for suggestion in suggestions:
-    if st.button(suggestion, key=f"suggestion-{suggestion}"):
-        question = suggestion
-st.markdown("</div>", unsafe_allow_html=True)
+    if st.button(suggestion, key=f"suggestion-{suggestion}", help=f"Click to ask: {suggestion}"):
+        st.session_state.question = suggestion
+st.markdown('</div>', unsafe_allow_html=True)
 
-# Process user input
-if submit_button and question:
-    # Call OpenAI API or generate response based on the Bhagavad Gita
-    st.markdown(f"<div class='answer-section'>Your question: {question}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='answer-section'>Response: <em>Based on the Bhagavad Gita...</em></div>", unsafe_allow_html=True)
+# Input field
+question = st.text_input(
+    "Ask your question",
+    key="question",
+    placeholder="Type your question here...",
+    value=st.session_state.get('question', '')
+)
 
-# Footer with social media links
-st.markdown("""
-    <div class='footer'>
-        Powered by <b>GJAM Technologies</b><br>
-        Part of the <b>Tumhari Universe</b> product line<br>
-        <div class="social-icons">
-            <a href="https://www.facebook.com/gjamtechnologies" target="_blank">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/5/51/Facebook_f_logo_%282019%29.svg" alt="Facebook">
-            </a>
-            <a href="https://www.twitter.com/gjamtechnologies" target="_blank">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Instagram_icon.png" alt="Twitter">
-            </a>
-            <a href="https://www.linkedin.com/company/gjamtechnologies" target="_blank">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" alt="LinkedIn">
-            </a>
+def generate_response(question):
+    # First, try with OpenAI
+    try:
+        prompt = f"""You are Krishna from the Mahabharata, answering questions based on the Bhagavad Gita's teachings.
+        Question: {question}
+        Please provide guidance with wisdom, compassion, and references to specific verses when applicable."""
+        
+        response = client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": question}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
+    
+    except Exception as e:
+        # Fallback to local model
+        try:
+            inputs = tokenizer(f"Question about Bhagavad Gita: {question}\nAnswer:", return_tensors="pt", max_length=512, truncation=True)
+            with torch.no_grad():
+                output_sequences = model.generate(
+                    input_ids=inputs["input_ids"],
+                    max_length=200,
+                    temperature=0.7,
+                    top_p=0.9,
+                    num_return_sequences=1
+                )
+            response = tokenizer.decode(output_sequences[0], skip_special_tokens=True)
+            return response
+        except Exception as local_e:
+            return "I apologize, but I am unable to process your question at the moment. Please try again later."
+
+# Process question when submitted
+if question:
+    with st.spinner('Seeking divine wisdom...'):
+        response = generate_response(question)
+        
+        st.markdown("""
+        <div class="response-container">
+            <h3>Divine Guidance:</h3>
+            <p>{}</p>
         </div>
-    </div>
+        """.format(response), unsafe_allow_html=True)
+
+# Footer
+st.markdown("""
+<div class="footer">
+    <p>🕉️ Created with devotion by GJAM Technologies</p>
+    <p>Part of the Tumhari Universe</p>
+</div>
 """, unsafe_allow_html=True)
