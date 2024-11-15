@@ -11,7 +11,6 @@ import openai
 # Initialize OpenAI client
 openai.api_key = st.secrets['openai_api_key']
 
-# Custom CSS for styling and animations
 st.markdown("""
     <style>
         body {
@@ -110,8 +109,37 @@ st.markdown("""
             border: 2px solid #A8FF00;
             border-radius: 8px;
         }
-
-        /* Keyframes for animations */
+        .stButton>button {
+            background-color: #A8FF00;
+            color: #000000;
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .stButton>button:hover {
+            background-color: #C0FF00;
+            transform: scale(1.05);
+        }
+        /* Responsiveness */
+        @media (max-width: 768px) {
+            .header {
+                font-size: 32px;
+            }
+            .subheader {
+                font-size: 18px;
+            }
+            .suggestion-box {
+                flex-direction: column;
+                gap: 5px;
+            }
+            .suggestion-button {
+                width: 100%;
+                text-align: center;
+            }
+        }
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -138,8 +166,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Main prompt
-st.write("Imagine if you could ask the Bhagavad Gita anything. What wisdom would you seek?")
-
+# User input with search button
+col1, col2 = st.columns([4, 1])
+with col1:
+    question = st.text_input(
+        "What would you like to ask?",
+        placeholder="Type your question here...",
+        key="user-question-input"
+    )
+with col2:
+    search_button = st.button("Ask")
 # Suggested questions
 suggestions = [
     "I've worked very hard but I'm still not able to achieve the results I hoped for, what do I do?",
@@ -149,23 +185,10 @@ suggestions = [
     "How do I find true happiness and purpose in life?"
 ]
 
-# Placeholder for user input
-if "selected_question" not in st.session_state:
-    st.session_state.selected_question = ""
-
-# Input field for user question (unique key)
-question = st.text_input(
-    "How can we help you today? Share your thoughts, feelings, or questions for the Gita's guidance.",
-    placeholder="Type your question here...",
-    value=st.session_state.selected_question,
-    key="main-question-input"
-)
-
-# Show suggested questions as clickable buttons in a styled box
 st.markdown("<div class='suggestion-box'>", unsafe_allow_html=True)
-for idx, suggestion in enumerate(suggestions):
-    if st.button(suggestion, key=f"suggestion-{idx}"):
-        st.session_state.selected_question = suggestion
+for suggestion in suggestions:
+    if st.button(suggestion, key=f"suggestion-{suggestion}"):
+        question = suggestion
 st.markdown("</div>", unsafe_allow_html=True)
 
 # Define header message for the assistant
