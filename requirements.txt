@@ -1,0 +1,6 @@
+pinecone-client
+openai
+streamlit 
+torch
+transformers
+openai
